@@ -1,5 +1,5 @@
-use hello_world::HelloRequest;
 use hello_world::greeter_client::GreeterClient;
+use hello_world::{GoodbyRequest, HelloRequest};
 
 pub mod hello_world {
     tonic::include_proto!("helloworld");
@@ -9,6 +9,7 @@ pub mod hello_world {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut client = GreeterClient::connect("http://0.0.0.0:50051").await?;
 
+    
     let request = tonic::Request::new(HelloRequest {
         name: "Tonic".into(),
     });
@@ -24,5 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "GoodBye : {}, detail : {}",
         response2.message, response2.detail
     );
+    
+    
     Ok(())
 }

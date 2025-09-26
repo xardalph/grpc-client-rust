@@ -3,7 +3,7 @@ package helloworld;
 
 service Greeter {
     rpc SayHello (HelloRequest) returns (HelloReply);
-    rpc SayGoodbye (HelloRequest) returns (GoodbyReply);
+    rpc SayGoodbye (GoodbyRequest) returns (GoodbyReply);
 
 }
 

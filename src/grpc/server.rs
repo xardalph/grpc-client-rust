@@ -9,6 +9,8 @@ pub mod hello_world {
 #[derive(Default)]
 pub struct TheGreeter {}
 pub mod proto {
+    tonic::include_proto!("helloworld");
+
     pub(crate) const FILE_DESCRIPTOR_SET: &[u8] =
         tonic::include_file_descriptor_set!("helloworld_descriptor");
 }
@@ -30,7 +32,7 @@ impl Greeter for TheGreeter {
     }
     async fn say_goodbye(
         &self,
-        request: Request<HelloRequest>,
+        request: tonic::Request<hello_world::GoodbyRequest>,
     ) -> Result<Response<GoodbyReply>, Status> {
         println!("Got a request from {:?}", request.remote_addr());
 

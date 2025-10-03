@@ -1,6 +1,11 @@
+use axum::body::Body;
 use hello_world::greeter_server::{Greeter, GreeterServer};
 use hello_world::{GoodbyReply, HelloReply, HelloRequest};
+
 use tonic::{Request, Response, Status, transport::Server};
+use tower_http::trace::DefaultMakeSpan;
+use tracing::Span;
+use tracing::info;
 
 pub mod hello_world {
     tonic::include_proto!("helloworld");
@@ -46,7 +51,11 @@ impl Greeter for TheGreeter {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let addr = "0.0.0.0:50051".parse().unwrap();
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
+
+    let addr = "127.0.0.1:50051".parse().unwrap();
     let service = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)
         .build_v1()
@@ -57,10 +66,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("GreeterServer listening on {addr}");
 
     Server::builder()
+        .trace_fn(|_| tracing::info_span!("helloworld_server"))
         .add_service(GreeterServer::new(greeter))
         .add_service(service)
         .serve(addr)
         .await?;
+    println!("gor a client !");
 
     Ok(())
 }

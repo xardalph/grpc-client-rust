@@ -3,9 +3,11 @@ name = "rust"
 version = "0.1.0"
 edition = "2024"
 
+
 [[bin]]
-name = "rest-api-server"
-path = "src/main.rs"
+name = "grpc-client"
+path = "src/grpc/client.rs"
+required-features = ["types", "reflection"]
 
 [[bin]]
 name = "grpc-server"
@@ -13,9 +15,8 @@ path = "src/grpc/server.rs"
 required-features = ["types"]
 
 [[bin]]
-name = "grpc-client"
-path = "src/grpc/client.rs"
-required-features = ["types"]
+name = "rest-api-server"
+path = "src/main.rs"
 
 [features]
 gcp = ["dep:prost-types", "tonic/tls-ring"]
@@ -131,7 +132,7 @@ hyper-rustls = { version = "0.27.0", features = [
     "ring",
     "tls12",
 ], optional = true, default-features = false }
-tower-http = { version = "0.6", optional = true }
+tower-http = { version = "0.6", optional = true, features = ["trace"]}
 axum = "0.8.4"
 tonic-prost-build = "0.14.2"
 

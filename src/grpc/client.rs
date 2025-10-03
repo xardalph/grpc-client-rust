@@ -1,31 +1,51 @@
-use hello_world::greeter_client::GreeterClient;
-use hello_world::{GoodbyRequest, HelloRequest};
+use tokio_stream::StreamExt;
+use tonic_reflection::pb::v1::{
+    ServerReflectionRequest, ServerReflectionResponse,
+    server_reflection_client::ServerReflectionClient, server_reflection_request::MessageRequest,
+    server_reflection_response::MessageResponse,
+};
 
-pub mod hello_world {
-    tonic::include_proto!("helloworld");
+fn parse_response(resp: ServerReflectionResponse) {
+    let message_response = resp.message_response.expect("message response");
+
+    if let MessageResponse::ListServicesResponse(list_response) = message_response {
+        for svc in list_response.service {
+            println!("\tfound service: `{:?}`", svc);
+        }
+    }
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut client = GreeterClient::connect("http://0.0.0.0:50051").await?;
+    println!("starting process on 50051");
+    let conn = tonic::transport::Endpoint::new("http://127.0.0.1:50051")?
+        .connect()
+        .await?;
 
-    
-    let request = tonic::Request::new(HelloRequest {
-        name: "Tonic".into(),
-    });
+    let mut client = ServerReflectionClient::new(conn);
+    println!("started process on 50051");
+    let list_services_request = ServerReflectionRequest {
+        host: "host".into(),
+        //message_request: Some(MessageRequest::FileByFilename(
+        //    "helloworld.Greeter".to_string(),
+        //)),
+        message_request: Some(MessageRequest::ListServices(
+            "list helloworld.Greeter".into(),
+        )),
+    };
+    println!("resp : {:?}", list_services_request);
+    //message_request: Some(MessageRequest::FileByFilename("helloworld.Greeter".to_string())),
+    let request_stream = tokio_stream::once(list_services_request);
+    let mut inbound = client
+        .server_reflection_info(request_stream)
+        .await?
+        .into_inner();
+    while let Some(recv) = inbound.next().await {
+        match recv {
+            Ok(resp) => parse_response(resp),
+            Err(e) => println!("\tdid not receive response due to error: `{}`", e),
+        }
+    }
 
-    let response = client.say_hello(request).await?;
-
-    println!("RESPONSE={response:?}");
-    let request2 = tonic::Request::new(GoodbyRequest {
-        name: "Tonic".into(),
-    });
-    let response2 = client.say_goodbye(request2).await?.into_inner();
-    println!(
-        "GoodBye : {}, detail : {}",
-        response2.message, response2.detail
-    );
-    
-    
     Ok(())
 }

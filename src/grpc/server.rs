@@ -60,7 +60,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)
         .build_v1alpha()
         .unwrap();
-
+    let serviceAlpha = tonic_reflection::server::Builder::configure()
+        .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)
+        .build_v1()
+        .unwrap();
     let greeter = TheGreeter::default();
 
     println!("GreeterServer listening on {addr}");
@@ -69,6 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .trace_fn(|_| tracing::info_span!("helloworld_server"))
         .add_service(GreeterServer::new(greeter))
         .add_service(service)
+        .add_service(serviceAlpha)
         .serve(addr)
         .await?;
     println!("gor a client !");

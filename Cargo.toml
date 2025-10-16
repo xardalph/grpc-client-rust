@@ -136,6 +136,7 @@ tower-http = { version = "0.6", optional = true, features = ["trace"]}
 axum = "0.8.4"
 tonic-prost-build = "0.14.2"
 grpc-ease = "0.1.1"
+prost-reflect = "0.16.2"
 
 [build-dependencies]
 tonic-prost-build = "*"

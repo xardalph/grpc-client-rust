@@ -1,4 +1,3 @@
-use crate::service_info::{MethodInfo, ServiceInfo};
 use prost::Message;
 use std::error::Error;
 use tokio_stream::StreamExt;
@@ -6,10 +5,32 @@ use tonic::{
     Request,
     transport::{Channel, Endpoint},
 };
-use tonic_reflection::pb::{
+use tonic_reflection::pb::v1::{
     ServerReflectionRequest, server_reflection_client::ServerReflectionClient,
     server_reflection_request::MessageRequest, server_reflection_response::MessageResponse,
 };
+/// Represents information about an RPC method
+#[derive(Debug)]
+pub struct MethodInfo {
+    /// The name of the RPC method
+    pub name: String,
+    /// The name of the request message
+    pub request: String,
+    /// The name of the response message
+    pub response: String,
+}
+
+/// Represents information about a gRPC service, including its package name,
+/// service name, and a list of RPC methods
+#[derive(Debug)]
+pub struct ServiceInfo {
+    /// The package name of the gRPC service
+    pub package: String,
+    /// The name of the gRPC service
+    pub service: String,
+    /// A list of RPC methods available in the service
+    pub methods: Vec<MethodInfo>,
+}
 
 pub struct ReflectionClient {
     client: ServerReflectionClient<Channel>,
@@ -47,63 +68,12 @@ impl ReflectionClient {
 
         Err("No response received".into())
     }
-
-    pub async fn list_services(&mut self) -> Result<Vec<ServiceInfo>, Box<dyn Error>> {
-        let response = self
-            .make_request(ServerReflectionRequest {
-                host: "".to_string(),
-                message_request: Some(MessageRequest::ListServices(String::new())),
-            })
-            .await?;
-
-        if let MessageResponse::ListServicesResponse(services_response) = response {
-            let mut services_info = Vec::new();
-
-            for service in services_response.service {
-                let descriptors = self.get_file_descriptor(service.name.clone()).await?;
-
-                for file_descriptor in descriptors {
-                    for service in file_descriptor.service {
-                        let methods: Vec<MethodInfo> = service
-                            .method
-                            .into_iter()
-                            .map(|method| {
-                                method
-                                    .name
-                                    .ok_or_else(|| {
-                                        format!(
-                                            "Method name is missing for service {:?}",
-                                            service.name
-                                        )
-                                    })
-                                    .map(|name| MethodInfo { name })
-                            })
-                            .collect::<Result<Vec<MethodInfo>, _>>()?;
-
-                        let package = file_descriptor.package.clone().ok_or_else(|| {
-                            format!("Package name is missing for service {:?}", service.name)
-                        })?;
-
-                        let service_name = service.name.ok_or_else(|| {
-                            format!("Service name is missing for package {}", package)
-                        })?;
-
-                        services_info.push(ServiceInfo {
-                            package,
-                            service: service_name,
-                            methods,
-                        });
-                    }
-                }
-            }
-
-            Ok(services_info)
-        } else {
-            Err("Expected a ListServicesResponse variant".into())
-        }
+    pub async fn get_proto_files(
+        &mut self,
+    ) -> Result<Vec<prost_types::FileDescriptorProto>, Box<dyn Error>> {
+        Ok(vec![])
     }
-
-    async fn get_file_descriptor(
+    async fn get_file_descriptor_from_symbol(
         &mut self,
         symbol: String,
     ) -> Result<Vec<prost_types::FileDescriptorProto>, Box<dyn Error>> {

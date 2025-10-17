@@ -1,27 +1,30 @@
 use grpc_ease::reflection::ReflectionClient;
 mod lib;
-use prost::Message;
-use tokio_stream::StreamExt;
-use tonic_reflection::pb::v1::{
-    ServerReflectionRequest, ServerReflectionResponse,
-    server_reflection_client::ServerReflectionClient, server_reflection_request::MessageRequest,
-    server_reflection_response::MessageResponse,
-};
-
-fn parse_response(resp: ServerReflectionResponse) {
-    let message_response = resp.message_response.expect("message response");
-
-    if let MessageResponse::ListServicesResponse(list_response) = message_response {
-        for svc in list_response.service {
-            println!("\tfound service: `{:?}`", svc);
-        }
-    }
-}
+use prost_reflect::DescriptorPool;
+use prost_reflect::DynamicMessage;
+use prost_types::FileDescriptorSet;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let url = "http://127.0.0.1:50051";
-
+    let url = "http://127.0.0.1:50051"; // one day let's take this as argument.
+    let mut client = lib::ReflectionClient::new(url.to_string()).await?;
+    let proto_files = client.get_proto_files().await.unwrap();
+    //println!("{:?}", proto_files);
+    let mut pool = DescriptorPool::new();
+    pool.add_file_descriptor_protos(proto_files.into_iter())?;
+    let service = pool
+        .get_service_by_name("helloworld.Greeter")
+        .expect("Service not found in proto pool");
+    let method = service
+        .methods()
+        .find(|x| x.name() == "SayHello")
+        .expect("no method found.");
+    println!("method : {:#?}", method.input());
+    let mut request_msg = DynamicMessage::new(method.input());
+    request_msg.set_field_by_name("name", prost_reflect::Value::String("rust".to_string()));
+    Ok(())
+}
+/*
     // let's try with reflection lib.
     //let client = persoreflection::ReflectionClient::new(url.to_string());
 
@@ -88,3 +91,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+ */

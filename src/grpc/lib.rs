@@ -71,7 +71,26 @@ impl ReflectionClient {
     pub async fn get_proto_files(
         &mut self,
     ) -> Result<Vec<prost_types::FileDescriptorProto>, Box<dyn Error>> {
-        Ok(vec![])
+        let response = self
+            .make_request(ServerReflectionRequest {
+                host: "".to_string(),
+                message_request: Some(MessageRequest::ListServices(String::new())),
+            })
+            .await?;
+
+        if let MessageResponse::ListServicesResponse(services_response) = response {
+            let mut proto_files = Vec::new();
+
+            for service in services_response.service {
+                let mut descriptors = self
+                    .get_file_descriptor_from_symbol(service.name.clone())
+                    .await?;
+                proto_files.append(&mut descriptors);
+            }
+            Ok(proto_files)
+        } else {
+            Err("Expected a ListServicesResponse variant".into())
+        }
     }
     async fn get_file_descriptor_from_symbol(
         &mut self,

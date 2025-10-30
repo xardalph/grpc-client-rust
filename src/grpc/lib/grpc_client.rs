@@ -1,32 +1,33 @@
 use prost::Message;
 use std::error::Error;
 use tokio_stream::StreamExt;
-use tonic::{Request, transport::Channel};
+use tonic::{Request, client::Grpc, transport::Channel};
 use tonic_reflection::pb::v1::{
     ServerReflectionRequest, server_reflection_client::ServerReflectionClient,
     server_reflection_request::MessageRequest, server_reflection_response::MessageResponse,
 };
-pub mod grpc_client;
 
-pub struct ReflectionClient {
-    client: ServerReflectionClient<Channel>,
+pub struct GrpcClient {
+    reflection_client: ServerReflectionClient<Channel>,
+    pub client: Grpc<Channel>,
 }
 
-impl ReflectionClient {
+impl GrpcClient {
     pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
         let channel = Channel::from_shared(endpoint)?.connect().await?;
         Ok(Self {
-            client: ServerReflectionClient::new(channel),
+            reflection_client: ServerReflectionClient::new(channel.clone()),
+            client: tonic::client::Grpc::new(channel),
         })
     }
 
-    pub async fn make_request(
+    pub async fn make_reflection_request(
         &mut self,
         request: ServerReflectionRequest,
     ) -> Result<MessageResponse, Box<dyn Error>> {
         let request = Request::new(tokio_stream::once(request));
         let mut inbound = self
-            .client
+            .reflection_client
             .server_reflection_info(request)
             .await?
             .into_inner();
@@ -41,7 +42,7 @@ impl ReflectionClient {
         &mut self,
     ) -> Result<Vec<prost_types::FileDescriptorProto>, Box<dyn Error>> {
         let response = self
-            .make_request(ServerReflectionRequest {
+            .make_reflection_request(ServerReflectionRequest {
                 host: "".to_string(),
                 message_request: Some(MessageRequest::ListServices(String::new())),
             })
@@ -66,7 +67,7 @@ impl ReflectionClient {
         symbol: String,
     ) -> Result<Vec<prost_types::FileDescriptorProto>, Box<dyn Error>> {
         let response = self
-            .make_request(ServerReflectionRequest {
+            .make_reflection_request(ServerReflectionRequest {
                 host: "".to_string(),
                 message_request: Some(MessageRequest::FileContainingSymbol(symbol)),
             })

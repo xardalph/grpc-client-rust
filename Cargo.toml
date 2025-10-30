@@ -5,6 +5,11 @@ edition = "2024"
 
 
 [[bin]]
+name = "grpc-client-static"
+path = "src/grpc/client_static.rs"
+required-features = ["types", "reflection"]
+
+[[bin]]
 name = "grpc-client"
 path = "src/grpc/client.rs"
 required-features = ["types", "reflection"]
@@ -94,8 +99,9 @@ default = ["full"]
 
 [dependencies]
 tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
-prost = "0.14"
+prost-reflect = { version = "0.16.2", features = ["serde"] }
 tonic = "0.14"
+prost = "0.14.1"
 tonic-prost = "0.14"
 
 # Optional dependencies
@@ -136,7 +142,6 @@ tower-http = { version = "0.6", optional = true, features = ["trace"]}
 axum = "0.8.4"
 tonic-prost-build = "0.14.2"
 grpc-ease = "0.1.1"
-prost-reflect = "0.16.2"
 
 [build-dependencies]
 tonic-prost-build = "*"

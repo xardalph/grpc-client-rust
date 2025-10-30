@@ -3,9 +3,11 @@ use hello_world::greeter_server::{Greeter, GreeterServer};
 use hello_world::{GoodbyReply, HelloReply, HelloRequest};
 
 use tonic::{Request, Response, Status, transport::Server};
-use tower_http::trace::DefaultMakeSpan;
-use tracing::Span;
+use tower_http::trace::{
+    DefaultMakeSpan, DefaultOnFailure, DefaultOnRequest, DefaultOnResponse, TraceLayer,
+};
 use tracing::info;
+use tracing::{Level, Span};
 
 pub mod hello_world {
     tonic::include_proto!("helloworld");
@@ -69,12 +71,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("GreeterServer listening on {addr}");
 
     Server::builder()
-        .trace_fn(|_| tracing::info_span!("helloworld_server"))
+        .layer(
+            TraceLayer::new_for_grpc()
+                .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
+                .on_request(DefaultOnRequest::new().level(Level::INFO))
+                .on_response(DefaultOnResponse::new().level(Level::INFO)),
+        )
         .add_service(GreeterServer::new(greeter))
         .add_service(service)
         .add_service(service_alpha)
         .serve(addr)
         .await?;
+
     println!("gor a client !");
 
     Ok(())

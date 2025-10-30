@@ -1,27 +1,52 @@
-use grpc_ease::reflection::ReflectionClient;
+mod dynamic_codec;
 mod lib;
 use prost_reflect::DescriptorPool;
 use prost_reflect::DynamicMessage;
-use prost_types::FileDescriptorSet;
+use tonic::Request;
+use tonic::transport::Channel;
+
+use crate::dynamic_codec::DynamicCodec;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let url = "http://127.0.0.1:50051"; // one day let's take this as argument.
-    let mut client = lib::ReflectionClient::new(url.to_string()).await?;
+    let mut client = lib::grpc_client::GrpcClient::new(url.to_string())
+        .await
+        .unwrap();
+    client.client.ready().await?;
     let proto_files = client.get_proto_files().await.unwrap();
     //println!("{:?}", proto_files);
     let mut pool = DescriptorPool::new();
     pool.add_file_descriptor_protos(proto_files.into_iter())?;
     let service = pool
         .get_service_by_name("helloworld.Greeter")
-        .expect("Service not found in proto pool");
+        .ok_or("no service found")?;
     let method = service
         .methods()
-        .find(|x| x.name() == "SayHello")
-        .expect("no method found.");
-    println!("method : {:#?}", method.input());
+        .find(|x| x.name() == "SayHellos")
+        .ok_or("no grpc method found.")?;
+
     let mut request_msg = DynamicMessage::new(method.input());
-    request_msg.set_field_by_name("name", prost_reflect::Value::String("rust".to_string()));
+    request_msg.set_field_by_name(
+        "name",
+        prost_reflect::Value::String("astringIGive".to_string()),
+    );
+
+    let path = format!("/{}/{}", method.parent_service().full_name(), method.name());
+    // Create our DynamicCodec for the output type
+    let codec = DynamicCodec {
+        pool: pool.clone(),
+        message_name: method.output().full_name().to_string(),
+    };
+    let req = Request::new(request_msg);
+    println!("sending unary request.");
+    let response = client.client.unary(req, path.parse()?, codec).await?;
+    let dyn_msg = response.into_inner();
+
+    // Convert DynamicMessage → JSON string
+    let json = serde_json::to_string_pretty(&dyn_msg)?;
+    println!("Response as JSON:\n{}", json);
+    //println!("{:?}", response);
     Ok(())
 }
 /*

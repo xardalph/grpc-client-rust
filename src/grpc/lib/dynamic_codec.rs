@@ -68,7 +68,12 @@ impl Decoder for DynamicDecoder {
         let desc = self
             .pool
             .get_message_by_name(&self.message_name)
-            .ok_or_else(|| Status::internal("message not found in pool"))?;
+            .ok_or_else(|| {
+                Status::internal(format!(
+                    "message '{}' not found in pool",
+                    &self.message_name
+                ))
+            })?;
 
         let bytes = buf.copy_to_bytes(buf.remaining());
         let msg = DynamicMessage::decode(desc, bytes)

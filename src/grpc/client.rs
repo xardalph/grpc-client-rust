@@ -6,10 +6,15 @@ use prost_reflect::DynamicMessage;
 use std::error::Error;
 use tonic::Request;
 
+use crate::lib::dynamic_codec::DynamicCodec;
+use std::path::PathBuf;
+
+use crate::dynamic_codec::DynamicCodec;
+
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Cli {
-    /// url to connect to
+    /// required url to connect to (https://localhost:50051)
     #[arg(short, long, value_parser = parse_url)]
     url: String,
 
@@ -17,14 +22,20 @@ struct Cli {
     #[arg(short, long, action = clap::ArgAction::Count)]
     debug: u8,
 
+    /// either list all service, list one service, or make a request
     #[command(subcommand)]
-    command: Option<Commands>,
+    command: Commands,
 }
 
-#[derive(Subcommand, Debug, Clone)]
+#[derive(Subcommand, Debug)]
 enum Commands {
-    /// List available grpc services
-    List,
+    /// list grpc services
+    List {
+        /// detail grpc services asked, by default all of them
+        #[clap(value_parser, num_args = 1.., value_delimiter = ' ')]
+        list: Vec<String>,
+    },
+    /// send a grpc request
     Get {
         /// Grpc service to use
         service: String,
@@ -65,25 +76,27 @@ where
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut cli = Cli::parse();
+    let cli = Cli::parse();
 
     let mut client = lib::grpc_client::GrpcClient::new(cli.url.clone())
         .await
         .unwrap();
     client.client.ready().await?;
     let proto_files = client.get_proto_files().await.unwrap();
-    let mut pool = DescriptorPool::new();
-    pool.add_file_descriptor_protos(proto_files.into_iter())?;
+    //println!("{:?}", proto_files);
     match cli.command() {
-        Commands::List => {
-            println!("{:#?}", pool);
-            Ok(())
-        }
-        Commands::Get {
+            Commands::List { list } => {
+                println!("List {:?}", list);
+                client.list_services_to_stdout(list).await?;
+                Ok(())
+            }
+Commands::Get {
             service,
             method,
             arguments,
         } => {
+            let mut pool = DescriptorPool::new();
+            pool.add_file_descriptor_protos(proto_files.into_iter())?;
             let service_pool = pool
                 .get_service_by_name(service.as_str())
                 .ok_or(format!("no service {} found.", service.as_str()))?;
@@ -120,74 +133,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             //println!("{:?}", response);
             Ok(())
         }
-    }
 }
-
-/*
-    // let's try with reflection lib.
-    //let client = persoreflection::ReflectionClient::new(url.to_string());
-
-    let conn = tonic::transport::Endpoint::new(url)?.connect().await?;
-
-    let mut client = ServerReflectionClient::new(conn);
-    println!("started client.");
-
-    let list_services_request = ServerReflectionRequest {
-        host: "host".into(),
-        //message_request: Some(MessageRequest::FileByFilename(
-        //    "helloworld.Greeter".to_string(),
-        //)),
-        message_request: Some(MessageRequest::ListServices("".into())),
-    };
-    println!("query list service : {:?}", list_services_request);
-    let request_stream = tokio_stream::once(list_services_request);
-    let mut inbound = client
-        .server_reflection_info(request_stream)
-        .await?
-        .into_inner();
-    while let Some(recv) = inbound.next().await {
-        match recv {
-            Ok(resp) => parse_response(resp),
-            Err(e) => println!("\tdid not receive response due to error: `{}`", e),
-        }
-    }
-    let get_file_request = ServerReflectionRequest {
-        host: "host".into(),
-        //message_request: Some(MessageRequest::FileByFilename(
-        //    "helloworld.Greeter".to_string(),
-        //)),
-        message_request: Some(MessageRequest::FileContainingSymbol(
-            "helloworld.Greeter".into(),
-        )),
-    };
-    println!("query : {:?}", get_file_request);
-    let request_stream_file = tokio_stream::once(get_file_request);
-    let mut inbound = client
-        .server_reflection_info(request_stream_file)
-        .await?
-        .into_inner();
-
-    while let Some(recv) = inbound.next().await {
-        match recv {
-            Ok(resp) => {
-                let message_response = resp.message_response.expect("message response");
-                if let MessageResponse::FileDescriptorResponse(descriptor_response) =
-                    message_response
-                {
-                    let mut descriptors = Vec::new();
-                    for file_descriptor_proto in descriptor_response.file_descriptor_proto {
-                        let file_descriptor =
-                            prost_types::FileDescriptorProto::decode(&file_descriptor_proto[..])?;
-                        descriptors.push(file_descriptor);
-                        println!("got a first file descriptor!");
-                    }
-                    println!("list of descroptor : {:#?}", descriptors);
-                }
-            }
-            Err(e) => println!("\tdid not receive response due to error: `{}`", e),
-        }
-    }
-
-    Ok(())
-}
- */

@@ -61,7 +61,7 @@ impl GrpcClient {
         println!("ok on peux lister les services ici, @TODO");
         let files = self.get_proto_files().await?;
         for f in files {
-            if !filter.contains(&f.name.clone().unwrap_or_default()) {
+            if filter.is_empty() && !filter.contains(&f.name.clone().unwrap_or_default()) {
                 continue;
             }
             for message in &f.message_type {

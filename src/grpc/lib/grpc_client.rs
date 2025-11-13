@@ -7,8 +7,10 @@ use tonic_reflection::pb::v1::{
     ServerReflectionRequest, server_reflection_client::ServerReflectionClient,
     server_reflection_request::MessageRequest, server_reflection_response::MessageResponse,
 };
+use tower::ready_cache::cache::Equivalent;
 
-use crate::Cli;
+use tracing::log::{Level, debug, error, info, log_enabled};
+
 /// A Grpc client that integrate both the reflection and the standard grpc client on the same channel
 /// ServerReflectionClient does not seem to allow to retrieve the inner client so we need to duplicate it
 /// the channel support the only tcp connection of this, so this should not be too costly or seen in the server log.
@@ -16,7 +18,45 @@ pub struct GrpcClient {
     reflection_client: ServerReflectionClient<Channel>,
     pub client: Grpc<Channel>,
 }
-
+#[derive(Debug, Clone)]
+pub struct GrpcFilter {
+    file: Option<String>,
+    service: Option<String>,
+    method: Option<String>,
+}
+/// return false if filter is empty or match the value
+pub fn filter_file(filter: &Vec<GrpcFilter>, val: &String) -> bool {
+    if filter.is_empty()
+        || filter
+            .iter()
+            .any(|f| f.file.as_ref().map_or(true, |f| f == val))
+    {
+        return false;
+    }
+    return true;
+}
+/// return false if filter is empty or match the value
+pub fn filter_service(filter: &Vec<GrpcFilter>, val: &str) -> bool {
+    if filter.is_empty()
+        || filter
+            .iter()
+            .any(|f| f.service.as_ref().map_or(true, |f| f == val))
+    {
+        return false;
+    }
+    return true;
+}
+/// return false if filter is empty or match the value
+pub fn filter_method(filter: &Vec<GrpcFilter>, val: &str) -> bool {
+    if filter.is_empty()
+        || filter
+            .iter()
+            .any(|f| f.method.as_ref().map_or(true, |f| f == val))
+    {
+        return false;
+    }
+    return true;
+}
 impl GrpcClient {
     /// Create a [`GrpcClient`] from a string and await for connection to be established,
     ///
@@ -52,29 +92,57 @@ impl GrpcClient {
 
         return Err("No response received".into());
     }
+
     /// show services exposed by a grpc server on stdout.
     /// Filter which service to show by an include filter vector
     pub async fn list_services_to_stdout(
         &mut self,
-        filter: &Vec<String>,
+        filters_string: &Vec<String>,
     ) -> Result<(), Box<dyn Error>> {
-        println!("ok on peux lister les services ici, @TODO");
+        // let's first transform the vector of string to something more usable with Option to manage the empty value
+        let mut filter = vec![];
+        for f in filters_string {
+            let owned = f.to_owned();
+            let mut v = owned.split(".");
+
+            filter.push(GrpcFilter {
+                // TODO : empty string should be changed to None instead of Some("")
+                file: v.next().map(|s| s.to_string()).take_if(
+                    |v| {
+                        if *v == "" { false } else { true }
+                    },
+                ),
+                service: v
+                    .next()
+                    .map(|s| s.to_string())
+                    .take_if(|v| if *v == "" { false } else { true }),
+                method: v
+                    .next()
+                    .map(|s| s.to_string())
+                    .take_if(|v| if *v == "" { false } else { true }),
+            });
+        }
+
         let files = self.get_proto_files().await?;
+        debug!("filter : {:?}", filter);
         for f in files {
-            if filter.is_empty() && !filter.contains(&f.name.clone().unwrap_or_default()) {
+            debug!("checking file '{}'", &f.package());
+            if filter_file(&filter, &f.package.clone().unwrap_or_default()) {
                 continue;
             }
-            for message in &f.message_type {
-                println!(
-                    "{} : {:#?}",
-                    message.name.clone().unwrap_or_default(),
-                    message.field
-                )
-            }
-            println!("file {} :", &f.name());
+            println!("file {} :", &f.package());
             for s in &f.service {
+                debug!("checking service '{}'", s.name());
+                if filter_service(&filter, s.name()) {
+                    continue;
+                }
                 println!("  service {:?}", &s.name());
                 for m in &s.method {
+                    debug!("checking method '{}'", m.name());
+
+                    if filter_method(&filter, m.name()) {
+                        continue;
+                    }
                     println!(
                         "    method : {}, input: {}, output : {}",
                         &m.name(),
@@ -82,7 +150,7 @@ impl GrpcClient {
                         &m.output_type()
                     );
                     // let's show the input_type message definition and the output_type message here
-                    self.print_grpc_message(&f, &m.input_type());
+                    let _ = self.print_grpc_message(&f, &m.input_type());
 
                     while let Some(o) = &m.options {
                         println!("   option : {:#?}", &o);
@@ -100,7 +168,7 @@ impl GrpcClient {
         println!("     searching message {}", msg_name);
         for msg in &file.message_type {
             if format!("{}.{}", file.package(), msg.name()) != msg_name {
-                println!("{} {} != {}", file.package(), &msg.name(), &msg_name);
+                //println!("{} {} != {}", file.package(), &msg.name(), &msg_name);
                 continue;
             }
             println!(" msg {}", msg.name());

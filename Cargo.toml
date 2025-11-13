@@ -143,6 +143,7 @@ axum = "0.8.4"
 tonic-prost-build = "0.14.2"
 grpc-ease = "0.1.1"
 clap = { version = "4.5.51", features = ["derive"] }
+env_logger = "0.11.8"
 
 [build-dependencies]
 tonic-prost-build = "*"

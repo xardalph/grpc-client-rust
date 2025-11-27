@@ -167,14 +167,14 @@ impl GrpcClient {
     ) -> Result<(), Box<dyn Error>> {
         println!("     searching message {}", msg_name);
         for msg in &file.message_type {
-            if format!("{}.{}", file.package(), msg.name()) != msg_name {
-                //println!("{} {} != {}", file.package(), &msg.name(), &msg_name);
+            if format!(".{}.{}", file.package(), msg.name()) != msg_name {
+                //println!(".{}.{} != {}", file.package(), &msg.name(), &msg_name);
                 continue;
             }
             println!(" msg {}", msg.name());
             for m in &msg.field {
                 println!(
-                    "        Field {}: is of type {}",
+                    "        Field '{}' is of type {}",
                     m.json_name(),
                     &m.r#type().as_str_name()
                 )

@@ -1,58 +1,137 @@
-use axum::{
-    Json, Router,
-    http::StatusCode,
-    routing::{get, post},
-};
-use serde::{Deserialize, Serialize};
+//use crate::lib::dynamic_codec::DynamicCodec;
+use clap::{Parser, Subcommand};
+use grpc_client::grpc_client::Client;
+use prost_reflect::DescriptorPool;
+use prost_reflect::DynamicMessage;
+use std::error::Error;
+use tonic::Request;
+use tracing::log::{Level, debug, error, info, log_enabled};
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Cli {
+    /// required url to connect to (https://localhost:50051)
+    #[arg(short, long, value_parser = parse_url)]
+    url: String,
+
+    /// Turn debugging information on
+    #[arg(short, long, action = clap::ArgAction::Count)]
+    debug: u8,
+
+    /// either list all service, list one service, or make a request
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum Commands {
+    /// list grpc services
+    List {
+        /// detail grpc services asked, by default all of them
+        /// Filter is inclusive and non regexp
+        /// ex: filename.servicename.methodname
+        /// each part is optionnal, so ".servicename." work to filter only on the servicename, but not "servicename"
+        #[clap(value_parser, num_args = 1.., value_delimiter = ' ')]
+        list: Vec<String>,
+    },
+    /// send a grpc request
+    Get {
+        /// Grpc service to use
+        service: String,
+        /// Grpc method to search and execute
+        method: String,
+        /// Tuples of method arguments, ex : -a argName=value -a argName2=val2
+        #[arg(short = 'a', value_parser = parse_key_val::<String, String>)]
+        arguments: Vec<(String, String)>,
+    },
+}
+impl Cli {
+    pub fn command(&self) -> Commands {
+        self.command
+            .clone()
+            .unwrap_or(Commands::List { list: vec![] })
+    }
+}
+fn parse_url(s: &str) -> Result<String, String> {
+    if s.starts_with("http://") || s.starts_with("https://") {
+        Ok(s.to_string())
+    } else {
+        // Prepend https:// if missing
+        Ok(format!("https://{}", s))
+    }
+}
+// Parse a single key-value pair to be used by clap.
+// taken from https://github.com/clap-rs/clap/blob/f45a32ec2c1506faf319d914d985927ed47b0b5e/examples/typed-derive.rs
+fn parse_key_val<T, U>(s: &str) -> Result<(T, U), Box<dyn Error + Send + Sync + 'static>>
+where
+    T: std::str::FromStr,
+    T::Err: Error + Send + Sync + 'static,
+    U: std::str::FromStr,
+    U::Err: Error + Send + Sync + 'static,
+{
+    let pos = s
+        .find('=')
+        .ok_or_else(|| format!("invalid KEY=value: no `=` found in `{s}`"))?;
+    Ok((s[..pos].parse()?, s[pos + 1..].parse()?))
+}
 
 #[tokio::main]
-async fn main() {
-    // initialize tracing
-    tracing_subscriber::fmt::init();
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let cli = Cli::parse();
+    env_logger::init();
+    info!("Starting the program");
 
-    // build our application with a route
-    let app = Router::new()
-        // `GET /` goes to `root`
-        .route("/", get(root))
-        // `POST /users` goes to `create_user`
-        .route("/users", post(create_user));
+    let mut client = Client::new(cli.url.clone()).await.unwrap();
 
-    // run our app with hyper, listening globally on port 3000
-    println!("Starting REST api on 0.0.0.0:3000");
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-    axum::serve(listener, app).await.unwrap();
-}
+    //println!("{:?}", proto_files);
+    match cli.command() {
+        Commands::List { list } => {
+            println!("List {:?}", list);
+            client.list_services_to_stdout(&list).await?;
+            Ok(())
+        }
+        Commands::Get {
+            service,
+            method,
+            arguments,
+        } => {
+            let proto_files = client.get_proto_files().await.unwrap();
+            let mut pool = DescriptorPool::new();
+            pool.add_file_descriptor_protos(proto_files.into_iter())?;
+            let service_pool = pool
+                .get_service_by_name(service.as_str())
+                .ok_or(format!("no service {} found.", service.as_str()))?;
+            let method = service_pool
+                .methods()
+                .find(|x| x.name() == method.as_str())
+                .ok_or(format!("no grpc method {} found.", method.as_str()))?;
 
-// basic handler that responds with a static string
-async fn root() -> &'static str {
-    "Hello, World!"
-}
+            let mut request_msg = DynamicMessage::new(method.input());
+            for arg in arguments {
+                if request_msg.get_field_by_name(&arg.0) == None {
+                    return Err(
+                        format!("field '{}' don't exist for message {}", arg.0, service,).into(),
+                    );
+                }
+                request_msg.set_field_by_name(&arg.0, prost_reflect::Value::String(arg.1));
+                println!("fields : {:#?}", request_msg.get_field_by_name("name"));
+            }
 
-async fn create_user(
-    // this argument tells axum to parse the request body
-    // as JSON into a `CreateUser` type
-    Json(payload): Json<CreateUser>,
-) -> (StatusCode, Json<User>) {
-    // insert your application logic here
-    let user = User {
-        id: 1337,
-        username: payload.username,
-    };
+            let path = format!("/{}/{}", method.parent_service().full_name(), method.name());
+            // Create our DynamicCodec for the output type
+            let codec = DynamicCodec {
+                pool: pool.clone(),
+                message_name: method.output().full_name().to_string(),
+            };
+            let req = Request::new(request_msg);
+            println!("sending unary request.");
+            let response = client.client.unary(req, path.parse()?, codec).await?;
+            let dyn_msg = response.into_inner();
 
-    // this will be converted into a JSON response
-    // with a status code of `201 Created`
-    (StatusCode::CREATED, Json(user))
-}
-
-// the input to our `create_user` handler
-#[derive(Deserialize)]
-struct CreateUser {
-    username: String,
-}
-
-// the output to our `create_user` handler
-#[derive(Serialize)]
-struct User {
-    id: u64,
-    username: String,
+            // Convert DynamicMessage → JSON string
+            let json = serde_json::to_string_pretty(&dyn_msg)?;
+            println!("Response as JSON:\n{}", json);
+            //println!("{:?}", response);
+            Ok(())
+        }
+    }
 }

@@ -3,6 +3,10 @@ name = "rust"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "grpc_client"
+path = "src/lib.rs"
+required-features = ["types", "reflection"]
 
 [[bin]]
 name = "grpc-client-static"
@@ -12,6 +16,11 @@ required-features = ["types", "reflection"]
 [[bin]]
 name = "grpc-client"
 path = "src/grpc/client.rs"
+required-features = ["types", "reflection"]
+
+[[bin]]
+name = "main"
+path = "src/main.rs"
 required-features = ["types", "reflection"]
 
 [[bin]]
@@ -144,6 +153,7 @@ tonic-prost-build = "0.14.2"
 grpc-ease = "0.1.1"
 clap = { version = "4.5.51", features = ["derive"] }
 env_logger = "0.11.8"
+thiserror = "2.0.18"
 
 [build-dependencies]
 tonic-prost-build = "*"

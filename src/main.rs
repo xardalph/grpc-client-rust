@@ -1,10 +1,13 @@
 //use crate::lib::dynamic_codec::DynamicCodec;
 use clap::{Parser, Subcommand};
 use grpc_client::grpc_client::Client;
+use grpc_client::grpc_client::client::GrpcFilter;
+use grpc_client::grpc_client::client::GrpcFilters;
 use prost_reflect::DescriptorPool;
 use prost_reflect::DynamicMessage;
 use std::error::Error;
 use tonic::Request;
+
 use tracing::log::{Level, debug, error, info, log_enabled};
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -86,7 +89,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match cli.command() {
         Commands::List { list } => {
             println!("List {:?}", list);
-            client.list_services_to_stdout(&list).await?;
+            let filters = GrpcFilters::new(list);
+
+            client.list_services_to_stdout(filters).await?;
             Ok(())
         }
         Commands::Get {
@@ -94,7 +99,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             method,
             arguments,
         } => {
-            let proto_files = client.get_proto_files().await.unwrap();
+            /*  let proto_files = client.get_proto_files().await.unwrap();
             let mut pool = DescriptorPool::new();
             pool.add_file_descriptor_protos(proto_files.into_iter())?;
             let service_pool = pool
@@ -130,7 +135,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Convert DynamicMessage → JSON string
             let json = serde_json::to_string_pretty(&dyn_msg)?;
             println!("Response as JSON:\n{}", json);
-            //println!("{:?}", response);
+            //println!("{:?}", response); */
             Ok(())
         }
     }

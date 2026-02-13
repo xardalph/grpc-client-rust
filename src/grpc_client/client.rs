@@ -23,10 +23,11 @@ pub struct Client {
 }
 #[derive(Debug, Clone)]
 pub struct GrpcFilter {
-    file: Option<String>,
-    service: Option<String>,
-    method: Option<String>,
+    pub file: Option<String>,
+    pub service: Option<String>,
+    pub method: Option<String>,
 }
+
 #[derive(Error, Debug)]
 pub enum GrpcClientError {
     #[error("Failed to create grpc client")]
@@ -87,50 +88,26 @@ impl Client {
     /// Filter which service to show by an include filter vector
     pub async fn list_services_to_stdout(
         &mut self,
-        filters_string: &Vec<String>,
+        filter: GrpcFilters,
     ) -> Result<(), GrpcClientError> {
-        // let's first transform the vector of string to something more usable with Option to manage the empty value
-        let mut filter = vec![];
-        for f in filters_string {
-            let owned = f.to_owned();
-            let mut v = owned.split(".");
-
-            filter.push(GrpcFilter {
-                // TODO : empty string should be changed to None instead of Some("")
-                file: v.next().map(|s| s.to_string()).take_if(
-                    |v| {
-                        if *v == "" { false } else { true }
-                    },
-                ),
-                service: v
-                    .next()
-                    .map(|s| s.to_string())
-                    .take_if(|v| if *v == "" { false } else { true }),
-                method: v
-                    .next()
-                    .map(|s| s.to_string())
-                    .take_if(|v| if *v == "" { false } else { true }),
-            });
-        }
-
         let files = self.get_proto_files().await?;
         debug!("filter : {:?}", filter);
         for f in files {
             debug!("checking file '{}'", &f.package());
-            if filter_file(&filter, &f.package.clone().unwrap_or_default()) {
+            if filter.filter_file(&f.package.clone().unwrap_or_default()) {
                 continue;
             }
             println!("file {} :", &f.package());
             for s in &f.service {
                 debug!("checking service '{}'", s.name());
-                if filter_service(&filter, s.name()) {
+                if filter.filter_service(s.name()) {
                     continue;
                 }
                 println!("  service {:?}", &s.name());
                 for m in &s.method {
                     debug!("checking method '{}'", m.name());
 
-                    if filter_method(&filter, m.name()) {
+                    if filter.filter_method(m.name()) {
                         continue;
                     }
                     println!(
@@ -227,38 +204,57 @@ impl Client {
         }
     }
 }
+#[derive(Debug, Clone)]
+pub struct GrpcFilters(Vec<GrpcFilter>);
+impl GrpcFilters {
+    pub fn new(input: Vec<std::string::String>) -> GrpcFilters {
+        let mut filters = vec![];
+        for filter in input {
+            let mut v = filter.split(".");
+            filters.push(GrpcFilter {
+                file: v.next().map(|e| e.to_string()),
+                service: v.next().map(|e| e.to_string()),
+                method: v.next().map(|e| e.to_string()),
+            });
+        }
+        GrpcFilters(filters)
+    }
 
-// todo : put this as functionnal design in an impl grpcfilter.
-/// return false if filter is empty or match the value
-pub fn filter_file(filter: &Vec<GrpcFilter>, val: &String) -> bool {
-    if filter.is_empty()
-        || filter
-            .iter()
-            .any(|f| f.file.as_ref().map_or(true, |f| f == val))
-    {
-        return false;
+    // todo : put this as functionnal design in an impl grpcfilter.
+    /// return false if filter is empty or match the value
+    pub fn filter_file(&self, val: &String) -> bool {
+        if self.0.is_empty()
+            || self
+                .0
+                .iter()
+                .any(|f| f.file.as_ref().map_or(true, |f| f == val))
+        {
+            return false;
+        }
+        return true;
     }
-    return true;
-}
-/// return false if filter is empty or match the value
-pub fn filter_method(filter: &Vec<GrpcFilter>, val: &str) -> bool {
-    if filter.is_empty()
-        || filter
-            .iter()
-            .any(|f| f.method.as_ref().map_or(true, |f| f == val))
-    {
-        return false;
+    /// return false if filter is empty or match the value
+    pub fn filter_method(&self, val: &str) -> bool {
+        if self.0.is_empty()
+            || self
+                .0
+                .iter()
+                .any(|f| f.method.as_ref().map_or(true, |f| f == val))
+        {
+            return false;
+        }
+        return true;
     }
-    return true;
-}
-/// return false if filter is empty or match the value
-pub fn filter_service(filter: &Vec<GrpcFilter>, val: &str) -> bool {
-    if filter.is_empty()
-        || filter
-            .iter()
-            .any(|f| f.service.as_ref().map_or(true, |f| f == val))
-    {
-        return false;
+    /// return false if filter is empty or match the value
+    pub fn filter_service(&self, val: &str) -> bool {
+        if self.0.is_empty()
+            || self
+                .0
+                .iter()
+                .any(|f| f.service.as_ref().map_or(true, |f| f == val))
+        {
+            return false;
+        }
+        return true;
     }
-    return true;
 }

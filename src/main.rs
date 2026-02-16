@@ -3,6 +3,8 @@ use clap::{Parser, Subcommand};
 use grpc_client::grpc_client::Client;
 use grpc_client::grpc_client::client::GrpcFilter;
 use grpc_client::grpc_client::client::GrpcFilters;
+use grpc_client::grpc_client::dynamic_codec::DynamicCodec;
+
 use prost_reflect::DescriptorPool;
 use prost_reflect::DynamicMessage;
 use std::error::Error;
@@ -83,7 +85,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
     info!("Starting the program");
 
-    let mut client = Client::new(cli.url.clone()).await.unwrap();
+    let mut client = Client::new(cli.url.clone()).await?;
 
     //println!("{:?}", proto_files);
     match cli.command() {
@@ -99,41 +101,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             method,
             arguments,
         } => {
-            /*  let proto_files = client.get_proto_files().await.unwrap();
-            let mut pool = DescriptorPool::new();
-            pool.add_file_descriptor_protos(proto_files.into_iter())?;
-            let service_pool = pool
-                .get_service_by_name(service.as_str())
-                .ok_or(format!("no service {} found.", service.as_str()))?;
-            let method = service_pool
-                .methods()
-                .find(|x| x.name() == method.as_str())
-                .ok_or(format!("no grpc method {} found.", method.as_str()))?;
-
-            let mut request_msg = DynamicMessage::new(method.input());
-            for arg in arguments {
-                if request_msg.get_field_by_name(&arg.0) == None {
-                    return Err(
-                        format!("field '{}' don't exist for message {}", arg.0, service,).into(),
-                    );
-                }
-                request_msg.set_field_by_name(&arg.0, prost_reflect::Value::String(arg.1));
-                println!("fields : {:#?}", request_msg.get_field_by_name("name"));
-            }
-
-            let path = format!("/{}/{}", method.parent_service().full_name(), method.name());
-            // Create our DynamicCodec for the output type
-            let codec = DynamicCodec {
-                pool: pool.clone(),
-                message_name: method.output().full_name().to_string(),
-            };
-            let req = Request::new(request_msg);
-            println!("sending unary request.");
-            let response = client.client.unary(req, path.parse()?, codec).await?;
-            let dyn_msg = response.into_inner();
-
+            let response = client.request(service, method, arguments);
             // Convert DynamicMessage → JSON string
-            let json = serde_json::to_string_pretty(&dyn_msg)?;
+            let json = serde_json::to_string_pretty(&response.await?)?;
             println!("Response as JSON:\n{}", json);
             //println!("{:?}", response); */
             Ok(())

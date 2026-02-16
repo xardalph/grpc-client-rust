@@ -1,4 +1,6 @@
+use http::uri::InvalidUri;
 use prost::Message;
+use prost_reflect::{DescriptorError, DescriptorPool, DynamicMessage};
 use prost_types::FileDescriptorProto;
 use rand::distr::uniform::UniformFloat;
 use std::error::Error;
@@ -11,6 +13,8 @@ use tonic_reflection::pb::v1::{
 };
 use tower::ready_cache::cache::Equivalent;
 use tracing::log::{Level, debug, error, info, log_enabled};
+
+use crate::grpc_client::dynamic_codec::DynamicCodec;
 
 /// A Grpc client that integrate both the reflection and the standard grpc client on the same channel
 /// ServerReflectionClient does not seem to allow to retrieve the inner client so we need to duplicate it
@@ -30,7 +34,7 @@ pub struct GrpcFilter {
 
 #[derive(Error, Debug)]
 pub enum GrpcClientError {
-    #[error("Failed to create grpc client")]
+    #[error("Failed to connect to given url")]
     GrpcClientCreationError(#[from] tonic::transport::Error),
     #[error("tonic error {0}")]
     ReflectionRequestError(#[from] tonic::Status),
@@ -42,6 +46,12 @@ pub enum GrpcClientError {
     BadMessageType(String),
     #[error("Connection failed {0}")]
     ConnectionFailed(String),
+    #[error("Field {0} do not exist for message {1}")]
+    ParamError(String, String),
+    #[error("[todo] desc error, maybe try getting the reflection data again: {0}")]
+    DescriptorError(#[from] DescriptorError),
+    #[error("[todo] desc error, maybe try getting the reflection data again: {0}")]
+    UriError(#[from] InvalidUri),
 }
 impl Client {
     /// Create a new GrpcClient, given a channel (which will be cloned)
@@ -57,6 +67,47 @@ impl Client {
         Ok(client)
     }
 
+    pub async fn request(
+        &mut self,
+        service: String,
+        method: String,
+        arguments: Vec<(String, String)>,
+    ) -> Result<DynamicMessage, GrpcClientError> {
+        let proto_files = self.get_proto_files().await.unwrap();
+        let mut pool = DescriptorPool::new();
+        pool.add_file_descriptor_protos(proto_files.into_iter())?;
+        dbg!(&pool);
+        let service_pool =
+            pool.get_service_by_name(service.as_str())
+                .ok_or(GrpcClientError::ParamError(
+                    service.to_string(),
+                    "".to_string(),
+                ))?;
+        let method = service_pool
+            .methods()
+            .find(|x| x.name() == method.as_str())
+            .ok_or(GrpcClientError::ParamError("".to_string(), "".to_string()))?;
+
+        let mut request_msg = DynamicMessage::new(method.input());
+        for arg in arguments {
+            if request_msg.get_field_by_name(&arg.0) == None {
+                return Err(GrpcClientError::ParamError(arg.0, service));
+            }
+            request_msg.set_field_by_name(&arg.0, prost_reflect::Value::String(arg.1));
+            println!("fields : {:#?}", request_msg.get_field_by_name("name"));
+        }
+
+        let path = format!("/{}/{}", method.parent_service().full_name(), method.name());
+        // Create our DynamicCodec for the output type
+        let codec = DynamicCodec {
+            pool: pool.clone(),
+            message_name: method.output().full_name().to_string(),
+        };
+        let req = Request::new(request_msg);
+        println!("sending unary request.");
+        let response = self.client.unary(req, path.parse()?, codec).await?;
+        Ok(response.into_inner())
+    }
     /// send a reflection request and wait for the response
     /// Should probably be private
     pub async fn make_reflection_request(

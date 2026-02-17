@@ -1,12 +1,11 @@
 //use crate::lib::dynamic_codec::DynamicCodec;
-use clap::{Parser, Subcommand};
-use grpc_client::grpc_client::Client;
-use grpc_client::grpc_client::client::GrpcFilter;
-use grpc_client::grpc_client::client::GrpcFilters;
-use grpc_client::grpc_client::dynamic_codec::DynamicCodec;
+mod grpc_client;
+use prost_reflect::{DescriptorPool, DynamicMessage};
 
-use prost_reflect::DescriptorPool;
-use prost_reflect::DynamicMessage;
+use clap::{Parser, Subcommand};
+use grpc_client::Client;
+use grpc_client::client::GrpcFilters;
+
 use std::error::Error;
 use tonic::Request;
 

@@ -1,6 +1,6 @@
 use http::uri::InvalidUri;
 use prost::Message;
-use prost_reflect::{DescriptorError, DescriptorPool, DynamicMessage};
+use prost_reflect::{DescriptorError, DescriptorPool, DynamicMessage, prost_types};
 use prost_types::FileDescriptorProto;
 use rand::distr::uniform::UniformFloat;
 use std::error::Error;

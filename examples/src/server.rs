@@ -1,13 +1,9 @@
-use axum::body::Body;
 use hello_world::greeter_server::{Greeter, GreeterServer};
 use hello_world::{GoodbyReply, HelloReply, HelloRequest};
 
 use tonic::{Request, Response, Status, transport::Server};
-use tower_http::trace::{
-    DefaultMakeSpan, DefaultOnFailure, DefaultOnRequest, DefaultOnResponse, TraceLayer,
-};
-use tracing::info;
-use tracing::{Level, Span};
+use tower_http::trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, TraceLayer};
+use tracing::Level;
 
 pub mod hello_world {
     tonic::include_proto!("helloworld");

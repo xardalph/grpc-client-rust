@@ -1,15 +1,12 @@
 //use crate::lib::dynamic_codec::DynamicCodec;
-mod grpc_client;
-use prost_reflect::{DescriptorPool, DynamicMessage};
 
 use clap::{Parser, Subcommand};
-use grpc_client::Client;
+use grpc_client::client::Client;
 use grpc_client::client::GrpcFilters;
 
 use std::error::Error;
-use tonic::Request;
 
-use tracing::log::{Level, debug, error, info, log_enabled};
+use tracing::log::info;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Cli {
@@ -78,21 +75,21 @@ where
     Ok((s[..pos].parse()?, s[pos + 1..].parse()?))
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn binary() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     env_logger::init();
     info!("Starting the program");
-
     let mut client = Client::new(cli.url.clone()).await?;
 
     //println!("{:?}", proto_files);
     match cli.command() {
         Commands::List { list } => {
-            println!("List {:?}", list);
+            println!("filters : {:?}", list);
             let filters = GrpcFilters::new(list);
 
-            client.list_services_to_stdout(filters).await?;
+            //client.list_services_to_stdout(filters).await?;
+            let proto = client.get_proto_files().await?;
+            dbg!(&proto.get(0).unwrap().message_type.get(0).unwrap());
             Ok(())
         }
         Commands::Get {
@@ -100,7 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             method,
             arguments,
         } => {
-            let response = client.request(service, method, arguments);
+            let response = client.request(&service, &method, arguments);
             // Convert DynamicMessage → JSON string
             let json = serde_json::to_string_pretty(&response.await?)?;
             println!("Response as JSON:\n{}", json);
@@ -108,4 +105,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
     }
+}
+#[tokio::main]
+async fn main() {
+    // allow to properly print thiserror errors
+    if let Err(e) = binary().await {
+        eprintln!("{}", e.to_string());
+        std::process::exit(1);
+    }
+    std::process::exit(0);
 }

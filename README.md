@@ -1,6 +1,6 @@
 ## Grpc client in rust
 
-Why ? because I wanted to learn rust, the go implementation is the way to go if you want a production ready
+Why ? because I wanted to learn rust, the go implementation is the way to go if you want a production ready tool
 
 ## Features :
 

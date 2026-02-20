@@ -2,25 +2,23 @@ use http::uri::InvalidUri;
 use prost::Message;
 use prost_reflect::{DescriptorError, DescriptorPool, DynamicMessage, prost_types};
 use prost_types::FileDescriptorProto;
-use rand::distr::uniform::UniformFloat;
 use std::error::Error;
 use thiserror::Error;
 use tokio_stream::StreamExt;
-use tonic::{IntoRequest, Request, client::Grpc, transport::Channel};
+use tonic::{Request, client::Grpc, transport::Channel};
 use tonic_reflection::pb::v1::{
     ServerReflectionRequest, server_reflection_client::ServerReflectionClient,
     server_reflection_request::MessageRequest, server_reflection_response::MessageResponse,
 };
-use tower::ready_cache::cache::Equivalent;
-use tracing::log::{Level, debug, error, info, log_enabled};
+use tracing::log::{debug, error};
 
-use crate::grpc_client::dynamic_codec::DynamicCodec;
+use crate::dynamic_codec::DynamicCodec;
 
-/// A Grpc client that integrate both the reflection and the standard grpc client on the same channel
-/// ServerReflectionClient does not seem to allow to retrieve the inner client so we need to duplicate it
-/// the channel support the only tcp connection of this, so this should not be too costly or seen in the server log.
-/// support only v1 reflection api for now.
+/// Grpc client with reflection support
 pub struct Client {
+    /// ServerReflectionClient does not seem to allow to retrieve the inner client so we need to duplicate it
+    /// the channel support the only tcp connection of this, so this should not be too costly or seen in the server log.
+    /// support only v1 reflection api for now.
     reflection_client: ServerReflectionClient<Channel>,
     cache: (), // todo : implement a cache system with file/in memory storage. (at least file for the client)
     pub client: Grpc<Channel>,
@@ -48,6 +46,8 @@ pub enum GrpcClientError {
     ConnectionFailed(String),
     #[error("Field {0} do not exist for message {1}")]
     ParamError(String, String),
+    #[error("could not find {0}")]
+    NotFoundError(String),
     #[error("[todo] desc error, maybe try getting the reflection data again: {0}")]
     DescriptorError(#[from] DescriptorError),
     #[error("[todo] desc error, maybe try getting the reflection data again: {0}")]
@@ -66,32 +66,38 @@ impl Client {
         client.client.ready().await?;
         Ok(client)
     }
-
+    /// Make a dynamic request taking as parameter a service name (filename.servicename), method name, and arguments.
+    /// function will return the dynamic message from tonic.
+    /// ```no_run
+    /// # tokio_test::block_on(async {
+    /// # use grpc_client::Client;
+    /// let mut client = Client::new("https://localhost:8080".to_string()).await.unwrap();
+    /// let response = client.request(&"filename.service", &"methodName", vec![("argName1".to_string(), "argValue".to_string()), ("argName2".to_string(),"value2".to_string())]);
+    /// # })
+    /// ```
     pub async fn request(
         &mut self,
-        service: String,
-        method: String,
+        service: &str,
+        method: &str,
         arguments: Vec<(String, String)>,
     ) -> Result<DynamicMessage, GrpcClientError> {
         let proto_files = self.get_proto_files().await.unwrap();
         let mut pool = DescriptorPool::new();
         pool.add_file_descriptor_protos(proto_files.into_iter())?;
-        dbg!(&pool);
         let service_pool =
-            pool.get_service_by_name(service.as_str())
-                .ok_or(GrpcClientError::ParamError(
-                    service.to_string(),
-                    "".to_string(),
-                ))?;
+            pool.get_service_by_name(service)
+                .ok_or(GrpcClientError::NotFoundError(format!(
+                    "service '{service}'"
+                )))?;
         let method = service_pool
             .methods()
-            .find(|x| x.name() == method.as_str())
-            .ok_or(GrpcClientError::ParamError("".to_string(), "".to_string()))?;
+            .find(|x| x.name() == method)
+            .ok_or(GrpcClientError::NotFoundError(format!("method '{method}'")))?;
 
         let mut request_msg = DynamicMessage::new(method.input());
         for arg in arguments {
             if request_msg.get_field_by_name(&arg.0) == None {
-                return Err(GrpcClientError::ParamError(arg.0, service));
+                return Err(GrpcClientError::ParamError(arg.0, service.to_string()));
             }
             request_msg.set_field_by_name(&arg.0, prost_reflect::Value::String(arg.1));
             println!("fields : {:#?}", request_msg.get_field_by_name("name"));
@@ -108,7 +114,7 @@ impl Client {
         let response = self.client.unary(req, path.parse()?, codec).await?;
         Ok(response.into_inner())
     }
-    /// send a reflection request and wait for the response
+    /// send a reflection request and wait for the response.
     /// Should probably be private
     pub async fn make_reflection_request(
         &mut self,
@@ -148,7 +154,7 @@ impl Client {
             if filter.filter_file(&f.package.clone().unwrap_or_default()) {
                 continue;
             }
-            println!("file {} :", &f.package());
+            println!("\nfile {} :", &f.package());
             for s in &f.service {
                 debug!("checking service '{}'", s.name());
                 if filter.filter_service(s.name()) {
@@ -183,13 +189,11 @@ impl Client {
         file: &FileDescriptorProto,
         msg_name: &str,
     ) -> Result<(), Box<dyn Error>> {
-        println!("     searching message {}", msg_name);
         for msg in &file.message_type {
             if format!(".{}.{}", file.package(), msg.name()) != msg_name {
                 //println!(".{}.{} != {}", file.package(), &msg.name(), &msg_name);
                 continue;
             }
-            println!(" msg {}", msg.name());
             for m in &msg.field {
                 println!(
                     "        Field '{}' is of type {}",
@@ -204,9 +208,12 @@ impl Client {
     /// get protobuf file from a remote server with reflection v1 api.
     /// For now v1_alpha is not accepted, it would be nice to do the work to make it parametrable on runtime
     ///
-    ///```
-    /// let mut client = lib::grpc_client::GrpcClient::new(url).await?;
-    /// let proto_files = client.get_proto_files().await?;
+    ///```rust, no_run
+    /// # tokio_test::block_on(async {
+    /// use grpc_client::Client;
+    /// let mut client = Client::new("https://localhost:8080".to_string()).await.unwrap();
+    /// let proto_files = client.get_proto_files().await.unwrap();
+    /// # })
     ///```
     pub async fn get_proto_files(
         &mut self,
@@ -261,7 +268,7 @@ impl GrpcFilters {
     pub fn new(input: Vec<std::string::String>) -> GrpcFilters {
         let mut filters = vec![];
         for filter in input {
-            let mut v = filter.split(".");
+            let mut v = filter.split(",");
             filters.push(GrpcFilter {
                 file: v.next().map(|e| e.to_string()),
                 service: v.next().map(|e| e.to_string()),
@@ -270,10 +277,16 @@ impl GrpcFilters {
         }
         GrpcFilters(filters)
     }
+    pub fn new_empty() -> GrpcFilters {
+        GrpcFilters(vec![])
+    }
 
     // todo : put this as functionnal design in an impl grpcfilter.
     /// return false if filter is empty or match the value
     pub fn filter_file(&self, val: &String) -> bool {
+        if val.starts_with("grpc.reflection.v") && self.0.is_empty() {
+            return true;
+        }
         if self.0.is_empty()
             || self
                 .0
